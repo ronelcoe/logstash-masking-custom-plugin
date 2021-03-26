@@ -1,0 +1,149 @@
+[[upgrading-logstash]]
+== Upgrading Logstash
+
+[IMPORTANT]
+===========================================
+Before upgrading Logstash:
+
+* Consult the <<breaking-changes,breaking changes>> docs.
+* Read the <<releasenotes>>.
+* Test upgrades in a development environment before upgrading your production cluster.
+
+While upgrading Logstash:
+
+* If you use {monitoring}, you must re-use the data directory when you
+upgrade Logstash. Otherwise, the Logstash node is assigned a new persistent UUID
+and becomes a new node in the monitoring data.
+===========================================
+
+If you're upgrading other products in the stack, also read the
+{stack-ref}/index.html[Elastic Stack Installation and Upgrade Guide]. Want an
+upgrade list that's tailored to your stack? Try out our
+{upgrade_guide}[Interactive Upgrade Guide].
+
+See the following topics for information about upgrading Logstash:
+
+* <<upgrading-using-package-managers>>
+* <<upgrading-using-direct-download>>
+* <<upgrading-logstash-6.0>>
+* <<upgrading-logstash-pqs>>
+
+[[upgrading-using-package-managers]]
+=== Upgrading Using Package Managers
+
+This procedure uses <<package-repositories,package managers>> to upgrade Logstash.
+
+1. Shut down your Logstash pipeline, including any inputs that send events to Logstash.
+2. Using the directions in the _Package Repositories_ section, update your repository links to point to the 6.x repositories
+instead of the previous version.
+3. Run the `apt-get upgrade logstash` or `yum update logstash` command as appropriate for your operating system.
+4. Test your configuration file with the `logstash --config.test_and_exit -f <configuration-file>` command. Configuration options for
+some Logstash plugins have changed in the 6.x release.
+5. Restart your Logstash pipeline after updating your configuration file.
+
+[[upgrading-using-direct-download]]
+=== Upgrading Using a Direct Download
+
+This procedure downloads the relevant Logstash binaries directly from Elastic.
+
+1. Shut down your Logstash pipeline, including any inputs that send events to Logstash.
+2. Download the https://www.elastic.co/downloads/logstash[Logstash installation file] that matches your host environment.
+3. Unpack the installation file into your Logstash directory.
+4. Test your configuration file with the `logstash --config.test_and_exit -f <configuration-file>` command. Configuration options for
+some Logstash plugins have changed in the 6.x release.
+5. Restart your Logstash pipeline after updating your configuration file.
+
+[[upgrading-logstash-6.0]]
+=== Upgrading Logstash to 6.0
+
+Before upgrading Logstash, remember to read the <<breaking-changes,breaking changes>>.
+
+If you are installing Logstash with other components in the Elastic Stack, also see the
+{stack-ref}/index.html[Elastic Stack installation and upgrade documentation].
+
+==== Issue with Logstash 6.0.0 `document_type` when writing to Elasticsearch 6.x
+
+We’d like to alert users to behavior in Logstash 6.0.0 that can cause errors when writing to Elasticsearch 6.0+ clusters. When Logstash attempts to index events that result in multiple `type` values, Logstash encounters indexing errors. These errors look similar to the following example, which has been shortened from the full message:
+
+[source,shell]
+----
+[2017-11-21T14:26:01,991][WARN ][logstash.outputs.elasticsearch] Could not index
+event to Elasticsearch.{:status=>400,  :response=>{"error"=>{"reason"=>"Rejecting
+mapping update to [myindex] as the final mapping would have more than 1 type:
+[type1, type2]"}}}}
+----
+
+Users are likely to encounter this error when Logstash is receiving data from:
+
+* multiple types of Beats
+* instances of Filebeat tailing mutliple files with different types
+* multiple Logstash inputs that specify different `type` values
+
+To work around this problem in Logstash 6.0.0, add the setting `document_type => doc` to the Elasticsearch output configuration. We will issue a patch to address this issue soon in a new version of Logstash. 
+
+Logstash has historically used the value of the `type` field to set the Elasticsearch `type` by default. Elasticsearch 6.0 https://www.elastic.co/guide/en/elasticsearch/reference/6.0/removal-of-types.html[no longer supports more than one type] per index. This is why the new behavior will only be applied to Elasticsearch 6.0+ clusters with our upcoming fixes.
+
+Please read on for more information about document types with Logstash and Elasticsearch 6.0
+
+==== Handling Document Types in Elasticsearch 6.0+
+
+As of Elasticsearch 6.0, document types are https://www.elastic.co/guide/en/elasticsearch/reference/6.0/removal-of-types.html[on the way out], and only a single mapping type per index is supported. For Logstash users this means transitioning to using the `type` field inside of the document instead of the document type. The effect is the same, but the usage is slightly different. This may mean reconfiguring existing Kibana dashboards to use the new `type` field instead of the document type.
+
+If you are using the default mapping templates in Logstash, you will need to upgrade your mapping templates. To do this, after migrating Elasticsearch to 6.0, you must override the existing template with the 6.x template. This can be done by ensuring that all configured Elasticsearch outputs have the following setting specified: `template_overwrite => true`.
+
+==== When to Upgrade
+
+Fresh installations can and should start with the same version across the Elastic Stack.
+
+Elasticsearch 6.0 does not require Logstash 6.0. An Elasticsearch 6.0 cluster will happily receive data from a
+Logstash 5.x instance via the default HTTP communication layer. This provides some flexibility to decide when to upgrade
+Logstash relative to an Elasticsearch upgrade. It may or may not be convenient for you to upgrade them together, and it
+is not required to be done at the same time as long as Elasticsearch is upgraded first.
+
+You should upgrade in a timely manner to get the performance improvements that come with Logstash 6.0, but do so in
+the way that makes the most sense for your environment.
+
+==== When Not to Upgrade
+
+If any Logstash plugin that you require is not compatible with Logstash 6.0, then you should wait until it is ready
+before upgrading.
+
+Although we make great efforts to ensure compatibility, Logstash 6.0 is not completely backwards compatible. As noted
+in the Elastic Stack upgrade guide, Logstash 6.0 should not be upgraded before Elasticsearch 6.0. This is both
+practical and because some Logstash 6.0 plugins may attempt to use features of Elasticsearch 6.0 that did not exist
+in earlier versions.
+
+[[upgrading-logstash-pqs]]
+=== Upgrading with the Persistent Queue Enabled
+
+The following applies only if you are upgrading from Logstash version 6.2.x or
+earlier with the persistent queue enabled.
+
+We regret to say that due to several serialization issues in Logstash 6.2.x and
+earlier, users will have to take some extra steps when upgrading Logstash with
+the persistent queue enabled. While we strive to maintain backward compatibility
+within a given major release, these bugs require us to break that compatibility
+in version 6.3.0 to ensure correctness of operation. For more technical details
+on this issue, please check our tracking github issue for this matter,
+https://github.com/elastic/logstash/issues/9494[#9494].
+
+[[drain-pq]]
+==== Drain the Persistent Queue
+
+If you use the persistent queue, we strongly recommend that you drain or delete
+it before you upgrade.
+
+To drain the queue:
+ 
+. In the logstash.yml file, set `queue.drain:true`.
+. Restart Logstash for this setting to take effect. 
+. Shutdown Logstash (using CTRL+C or SIGTERM), and wait for the queue to empty.
+
+When the queue is empty:
+
+. Complete the upgrade.
+. Restart Logstash.
+
+We are working to resolve issues with data incompatibilities so that these steps
+won’t be required for future upgrades.
+

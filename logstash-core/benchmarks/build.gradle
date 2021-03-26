@@ -1,0 +1,75 @@
+import org.yaml.snakeyaml.Yaml
+
+// fetch version from Logstash's master versions.yml file
+def versionMap = (Map) (new Yaml()).load(new File("$projectDir/../../versions.yml").text)
+
+description = """Logstash Core Java Benchmarks"""
+version = versionMap['logstash-core']
+String jrubyVersion = versionMap['jruby']['version']
+
+repositories {
+  mavenCentral()
+  jcenter()
+}
+
+buildscript {
+  repositories {
+    mavenCentral()
+    jcenter()
+  }
+  dependencies {
+    classpath 'org.yaml:snakeyaml:1.17'
+    classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.4'
+  }
+}
+
+test.enabled = false
+
+jar {
+  manifest {
+    attributes "Main-Class": "org.openjdk.jmh.Main"
+  }
+}
+
+ext {
+  jmh = 1.18
+}
+
+dependencies {
+  compile project(':logstash-core')
+  compile "org.openjdk.jmh:jmh-core:$jmh"
+  compile "org.openjdk.jmh:jmh-generator-annprocess:$jmh"
+  compile "org.openjdk.jmh:jmh-core-benchmarks:$jmh"
+  compile 'net.sf.jopt-simple:jopt-simple:5.0.3'
+  compile 'com.google.guava:guava:21.0'
+  compile 'commons-io:commons-io:2.5'
+  runtime 'joda-time:joda-time:2.8.2'
+  compile "org.jruby:jruby-core:$jrubyVersion"
+}
+
+javadoc {
+  enabled = false
+}
+
+apply plugin: 'com.github.johnrengelman.shadow'
+
+shadowJar {
+  baseName = 'logstash-core-benchmarks-all'
+  classifier = null
+  version = null
+}
+
+task jmh(type: JavaExec, dependsOn: [':logstash-core-benchmarks:clean', ':logstash-core-benchmarks:shadowJar']) {
+
+  main = "-jar"
+
+  doFirst {
+    args = [
+      "-Djava.io.tmpdir=${buildDir.absolutePath}",
+      "-XX:+UseParNewGC", "-XX:+UseConcMarkSweepGC", "-XX:CMSInitiatingOccupancyFraction=75",
+      "-XX:+UseCMSInitiatingOccupancyOnly", "-XX:+DisableExplicitGC",
+      "-XX:+HeapDumpOnOutOfMemoryError", "-Xms2g", "-Xmx2g",
+      shadowJar.archivePath,
+    ]
+  }
+}

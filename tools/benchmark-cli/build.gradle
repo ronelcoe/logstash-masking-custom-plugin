@@ -1,0 +1,64 @@
+import org.yaml.snakeyaml.Yaml
+
+// fetch version from Logstash's master versions.yml file
+def versionMap = (Map) (new Yaml()).load(new File("$projectDir/../../versions.yml").text)
+
+description = """Logstash End to End Benchmarking Utility"""
+version = versionMap['logstash-core']
+
+repositories {
+  mavenCentral()
+  jcenter()
+}
+
+buildscript {
+  repositories {
+    mavenCentral()
+    jcenter()
+  }
+  dependencies {
+    classpath 'org.yaml:snakeyaml:1.17'
+    classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.4'
+  }
+}
+
+ext {
+  jmh = '1.18'
+  elasticsearch = '5.5.0'
+}
+
+dependencies {
+  compile 'net.sf.jopt-simple:jopt-simple:5.0.3'
+  compile group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.3'
+  compile group: 'org.apache.commons', name: 'commons-compress', version: '1.14'
+  compile group: 'org.apache.commons', name: 'commons-lang3', version: '3.6'
+  compile group: 'commons-io', name: 'commons-io', version: '2.5'
+  compile 'com.fasterxml.jackson.core:jackson-core:2.7.4'
+  compile 'com.fasterxml.jackson.core:jackson-databind:2.7.4'
+  compile group: 'org.elasticsearch.client', name: 'rest', version: elasticsearch
+  compile "org.openjdk.jmh:jmh-core:$jmh"
+  testCompile group: 'com.github.tomakehurst', name: 'wiremock-standalone', version: '2.6.0'
+  testCompile "junit:junit:4.12"
+}
+
+javadoc {
+  enabled = false
+}
+
+test {
+  // We need to force IPV4 usage to make WireMock tests portable between *nix and Windows.
+  // For details see: https://github.com/elastic/logstash/pull/8372
+  jvmArgs '-Djava.net.preferIPv4Stack=true'
+  exclude '**/org/logstash/benchmark/cli/MainTest*'
+  exclude '**/org/logstash/benchmark/cli/MainEsStorageTest*'
+}
+
+apply plugin: 'com.github.johnrengelman.shadow'
+
+shadowJar {
+  baseName = 'benchmark-cli'
+  classifier = null
+  version = null
+}
+
+assemble.dependsOn shadowJar

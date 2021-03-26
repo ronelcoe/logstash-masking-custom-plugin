@@ -1,0 +1,156 @@
+import java.nio.file.Files
+import java.nio.file.Paths
+import org.yaml.snakeyaml.Yaml
+
+// fetch version from Logstash's master versions.yml file
+def versionMap = (Map) (new Yaml()).load(new File("$projectDir/../versions.yml").text)
+
+description = """Logstash Core Java"""
+version = versionMap['logstash-core']
+String jrubyVersion = versionMap['jruby']['version']
+String jacksonVersion = versionMap['jackson']
+
+repositories {
+    mavenCentral()
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.yaml:snakeyaml:1.17'
+    }
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    from sourceSets.main.allSource
+    classifier 'sources'
+    extension 'jar'
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    from javadoc.destinationDir
+    classifier 'javadoc'
+    extension 'jar'
+}
+
+task copyRuntimeLibs(type: Copy) {
+    into project.file('lib/jars/')
+    from configurations.compile, configurations.runtime
+}
+
+// copy jar file into the gem lib dir but without the version number in filename
+task copyGemjar(type: Copy, dependsOn: [sourcesJar, copyRuntimeLibs]) {
+    from project.jar
+    into project.file('lib/jars/')
+    rename(/(.+)-${project.version}.jar/, '$1.jar')
+}
+
+task cleanGemjar {
+    delete fileTree(project.file('lib/jars/')) {
+        include '*.jar'
+    }
+}
+
+clean.dependsOn(cleanGemjar)
+jar.finalizedBy(copyGemjar)
+assemble.dependsOn(copyGemjar)
+
+configurations.create('sources')
+configurations.create('javadoc')
+configurations.archives {
+    extendsFrom configurations.sources
+    extendsFrom configurations.javadoc
+}
+
+task javaTests(type: Test) {
+    exclude '/org/logstash/RSpecTests.class'
+    exclude '/org/logstash/config/ir/ConfigCompilerTest.class'
+    exclude '/org/logstash/config/ir/CompiledPipelineTest.class'
+    exclude '/org/logstash/config/ir/compiler/OutputDelegatorTest.class'
+}
+
+task rubyTests(type: Test) {
+    inputs.files fileTree("${projectDir}/lib")
+    inputs.files fileTree("${projectDir}/spec")
+    systemProperty 'logstash.core.root.dir', projectDir.absolutePath
+    include '/org/logstash/RSpecTests.class'
+    include '/org/logstash/config/ir/ConfigCompilerTest.class'
+    include '/org/logstash/config/ir/CompiledPipelineTest.class'
+    include '/org/logstash/config/ir/compiler/OutputDelegatorTest.class'
+}
+
+test {
+    exclude '/**'
+}
+test.dependsOn javaTests, rubyTests
+
+artifacts {
+    sources(sourcesJar) {
+        // Weird Gradle quirk where type will be used for the extension, but only for sources
+        type 'jar'
+    }
+    javadoc(javadocJar) {
+        type 'javadoc'
+    }
+}
+
+configurations {
+    provided
+}
+
+project.sourceSets {
+    main.compileClasspath += project.configurations.provided
+    main.runtimeClasspath += project.configurations.provided
+    test.compileClasspath += project.configurations.provided
+    test.runtimeClasspath += project.configurations.provided
+}
+project.javadoc.classpath += project.configurations.provided
+
+idea {
+    module {
+        scopes.PROVIDED.plus += [project.configurations.provided]
+    }
+}
+
+def customJRubyDir = project.hasProperty("custom.jruby.path") ? project.property("custom.jruby.path") : ""
+def customJRubyVersion = customJRubyDir == "" ? "" : Files.readAllLines(Paths.get(customJRubyDir, "VERSION")).get(0).trim()
+
+dependencies {
+    compile 'org.apache.logging.log4j:log4j-api:2.9.1'
+    compile 'org.apache.logging.log4j:log4j-core:2.9.1'
+    runtime 'org.apache.logging.log4j:log4j-slf4j-impl:2.9.1'
+    compile 'commons-codec:commons-codec:1.11'
+    // Jackson version moved to versions.yml in the project root (the JrJackson version is there too)
+    compile "com.fasterxml.jackson.core:jackson-core:${jacksonVersion}"
+    compile "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    compile "com.fasterxml.jackson.core:jackson-annotations:${jacksonVersion}"
+    compile 'org.codehaus.janino:janino:3.0.8'
+    compile "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:${jacksonVersion}"
+    if (customJRubyDir == "") {
+        compile "org.jruby:jruby-complete:${jrubyVersion}"
+    } else {
+        compile files(customJRubyDir + "/maven/jruby-complete/target/jruby-complete-${customJRubyVersion}.jar")
+    }
+    //call elasticsearch
+    //compile group: 'org.elasticsearch.client', name: 'transport', version: '6.7.1'
+    compile group: 'com.google.guava', name: 'guava', version: '22.0'
+    // Do not upgrade this, later versions require GPL licensed code in javac-shaded that is
+    // Apache2 incompatible
+    compile('com.google.googlejavaformat:google-java-format:1.1') {
+        exclude group: 'com.google.guava', module: 'guava'
+    }
+    compile 'org.javassist:javassist:3.22.0-GA'
+    compile 'com.google.guava:guava:20.0'
+    testCompile 'org.apache.logging.log4j:log4j-core:2.9.1:tests'
+    testCompile 'junit:junit:4.12'
+    testCompile 'net.javacrumbs.json-unit:json-unit:1.9.0'
+    testCompile 'org.elasticsearch:securemock:1.2'
+    testCompile 'org.assertj:assertj-core:3.8.0'
+    
+    // https://mvnrepository.com/artifact/org.apache.kafka/kafka-clients
+	compile group: 'org.apache.kafka', name: 'kafka-clients', version: '2.3.0'
+	// https://mvnrepository.com/artifact/org.json/json
+	compile group: 'org.json', name: 'json', version: '20180813'
+}
